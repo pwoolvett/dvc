@@ -193,10 +193,8 @@ def makedirs(path, exist_ok=False, mode=None):
         logger.trace("failed to chmod '%o' '%s'", mode, path, exc_info=True)
 
 
-def copyfile(src, dest, no_progress_bar=False, name=None):
+def copyfile(src, dest, callback=None, no_progress_bar=False, name=None):
     """Copy file with progress bar"""
-    from dvc.progress import Tqdm
-
     name = name if name else os.path.basename(dest)
     total = os.stat(src).st_size
 
@@ -206,20 +204,22 @@ def copyfile(src, dest, no_progress_bar=False, name=None):
     try:
         System.reflink(src, dest)
     except DvcException:
+        from dvc.progress import tdqm_or_callback_wrapped
+
         with open(src, "rb") as fsrc, open(dest, "wb+") as fdest:
-            with Tqdm.wrapattr(
+            with tdqm_or_callback_wrapped(
                 fdest,
                 "write",
-                desc=name,
+                total,
+                callback=callback,
                 disable=no_progress_bar,
-                total=total,
-                bytes=True,
-            ) as fdest_wrapped:
+                desc=name,
+            ) as wrapped:
                 while True:
                     buf = fsrc.read(LOCAL_CHUNK_SIZE)
                     if not buf:
                         break
-                    fdest_wrapped.write(buf)
+                    wrapped.write(buf)
 
 
 def copy_fobj_to_file(fsrc, dest):

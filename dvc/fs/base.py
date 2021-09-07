@@ -1,12 +1,16 @@
+import contextlib
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial, partialmethod
 from multiprocessing import cpu_count
 from typing import Any, ClassVar, Dict, FrozenSet, Optional
 
+from funcy import cached_property
+
 from dvc.exceptions import DvcException
 from dvc.path_info import URLInfo
 from dvc.progress import Tqdm
+from dvc.ui import ui
 from dvc.utils import tmp_fname
 from dvc.utils.fs import makedirs, move
 
@@ -217,8 +221,22 @@ class BaseFileSystem:
             return False
         return hash_.endswith(cls.CHECKSUM_DIR_SUFFIX)
 
-    def upload(self, from_info, to_info, name=None, no_progress_bar=False):
-        if not hasattr(self, "_upload"):
+    @cached_property
+    def _local_fs(self):
+        from dvc.fs import LocalFileSystem
+
+        return LocalFileSystem()
+
+    def upload(
+        self,
+        from_info,
+        to_info,
+        name=None,
+        callback=None,
+        no_progress_bar=False,
+        **pbar_kw,
+    ):
+        if not hasattr(self, "put_file"):
             raise RemoteActionNotImplemented("upload", self.scheme)
 
         if to_info.scheme != self.scheme:
@@ -231,12 +249,23 @@ class BaseFileSystem:
 
         name = name or from_info.name
 
-        self._upload(  # noqa, pylint: disable=no-member
-            from_info.fspath,
-            to_info,
-            name=name,
-            no_progress_bar=no_progress_bar,
-        )
+        stack = contextlib.ExitStack()
+        fs = self._local_fs
+        if not callback:
+            pbar = ui.progress(
+                desc=name,
+                disable=no_progress_bar,
+                bytes=True,
+                total=-1,
+                **pbar_kw,
+            )
+            stack.enter_context(pbar)
+            callback = pbar.as_callback(fs, from_info)
+
+        with stack:
+            src = from_info.fspath
+            # pylint: disable=no-member
+            return self.put_file(src, to_info, callback=callback)
 
     def upload_fobj(
         self, fobj, to_info, no_progress_bar=False, size=None, **pbar_args

@@ -1,5 +1,4 @@
 """Manages progress bars for DVC repo."""
-
 import logging
 import sys
 from threading import RLock
@@ -188,3 +187,20 @@ class FsspecCallback(fsspec.Callback):
 
     def absolute_update(self, value):
         self.progress_bar.update_to(value)
+
+
+def tdqm_or_callback_wrapped(
+    fobj, method, total, callback=None, **pbar_kwargs
+):
+    if callback:
+        from funcy import nullcontext
+        from tqdm.utils import CallbackIOWrapper
+
+        callback.set_size(total)
+        wrapper = CallbackIOWrapper(callback.relative_update, fobj, method)
+        return nullcontext(wrapper)
+
+    return Tqdm.wrapattr(fobj, method, total=total, bytes=True, **pbar_kwargs)
+
+
+DEFAULT_CALLBACK = fsspec.callbacks.NoOpCallback
